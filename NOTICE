@@ -1,0 +1,8 @@
+Entropy — Copyright Regolith Labs.
+
+Licensed under the Apache License, Version 2.0, as declared in the project's
+Cargo manifests (`license = "Apache-2.0"`); the licence text was not present in
+the upstream tree and is added here as LICENSE.
+
+This repository is MyBarPool's fork of regolith-labs/entropy at commit
+f26ae03cccab6188effb0a170b8123cf4bb54c94; the changes are listed in README.md.
