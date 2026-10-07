@@ -1,0 +1,115 @@
+name: Build
+
+# Builds the program two ways on every push and pull request and prints the
+# executable hash, so anyone can compare the deployed program with this source:
+#   cargo build-sbf --arch v3     the pinned Agave toolchain, the SBPFv3 header
+#                                 checked with readelf (Flags: 0x3);
+#   solana-verify build --arch v3 the Docker-based reproducible build, the same
+#                                 command `solana-verify remote submit-job` runs,
+#                                 pinned to the image that carries Agave 4.3.0.
+# The `cli` directory is not a workspace member and is not built.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  SOLANA_VERSION: "4.3.0"
+  SOLANA_VERIFY_VERSION: "0.5.2"
+  # solana-verify picks its Docker image from the `solana-program` version in
+  # Cargo.lock (2.1 here), whose image carries a `cargo-build-sbf` without
+  # `--arch v3`. This is the digest solana-verify 0.5.2 maps to Agave 4.3.0.
+  VERIFY_BASE_IMAGE: solanafoundation/solana-verifiable-build@sha256:12fd4c0a0790f0fc41ef74b0cdb6bccc167ba6137eb1adb749bac649481c86bd
+
+jobs:
+  build-sbf:
+    name: cargo build-sbf --arch v3 + readelf
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Solana ${{ env.SOLANA_VERSION }}
+        # The download is checked against the sha256 of the release asset
+        # (recorded 2026-10-03); a replaced asset fails the build instead of
+        # silently changing the toolchain.
+        env:
+          AGAVE_INSTALL_INIT_SHA256: 1c2ca01cd33204453fa97762b6fca40772e17e749d58266ea0847d7bc01756e1
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/toolchain && cd /tmp/toolchain
+          curl -sSfL -o agave-install-init \
+            "https://github.com/anza-xyz/agave/releases/download/v${SOLANA_VERSION}/agave-install-init-x86_64-unknown-linux-gnu"
+          printf '%s  agave-install-init\n' "$AGAVE_INSTALL_INIT_SHA256" | sha256sum -c -
+          chmod +x agave-install-init && ./agave-install-init "v${SOLANA_VERSION}"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Versions
+        run: solana --version && cargo-build-sbf --version
+
+      - name: cargo build-sbf --arch v3
+        run: cargo build-sbf --arch v3
+
+      - name: SBPFv3 header check
+        run: |
+          set -euo pipefail
+          readelf -h target/deploy/entropy_program.so | tee /dev/stderr | grep -q 'Flags:\s*0x3'
+
+      - name: File hash
+        run: sha256sum target/deploy/entropy_program.so
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: entropy_program-build-sbf-${{ github.sha }}
+          path: target/deploy/entropy_program.so
+
+  verifiable:
+    name: solana-verify build --arch v3 + hash
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust (host, for solana-verify)
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install solana-verify ${{ env.SOLANA_VERIFY_VERSION }}
+        # From outside the checkout: this repository's rust-toolchain.toml pins
+        # the host to 1.85.0 (upstream's pin, kept), which is older than
+        # solana-verify's dependencies accept; the program itself is built
+        # inside solana-verify's Docker image, where that pin has no effect.
+        run: cd "$RUNNER_TEMP" && cargo install solana-verify --version "$SOLANA_VERIFY_VERSION" --locked
+
+      - name: solana-verify build --arch v3
+        run: solana-verify build --arch v3 --library-name entropy_program --base-image "$VERIFY_BASE_IMAGE"
+
+      - name: SBPFv3 header check
+        run: |
+          set -euo pipefail
+          readelf -h target/deploy/entropy_program.so | tee /dev/stderr | grep -q 'Flags:\s*0x3'
+
+      - name: Hashes
+        # The executable hash strips trailing zeros, so it differs from the
+        # file's sha256; both are printed and both are what verify.osec.io and
+        # the consuming repository's fixture test compare against.
+        run: |
+          set -euo pipefail
+          sha256sum target/deploy/entropy_program.so
+          solana-verify get-executable-hash target/deploy/entropy_program.so | tee executable-hash.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: entropy_program-verifiable-${{ github.sha }}
+          path: |
+            target/deploy/entropy_program.so
+            executable-hash.txt
