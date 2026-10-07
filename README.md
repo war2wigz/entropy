@@ -1,3 +1,17 @@
+# MyBarPool's deployment
+
+This repository is [MyBarPool](https://mybarpool.com)'s fork of Regolith Labs' [Entropy](https://github.com/regolith-labs/entropy) at commit `f26ae03cccab6188effb0a170b8123cf4bb54c94`, the commit [verify.osec.io](https://verify.osec.io/status/3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X) reports for Regolith's mainnet deployment `3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X`. MyBarPool deploys it at **`ASo8r4EEFLPAMDk1w3XdKbEmq4c1GynbsHGa6RGG83fH`** because Regolith's deployment has the `Open` instruction disabled, so nobody else can create a `Var` on it.
+
+The changes to the program are exactly three, each its own commit: `api/src/lib.rs` — `declare_id!` is the program id above; `program/src/lib.rs` — the `EntropyInstruction::Open` dispatcher arm is uncommented (the `Open` handler itself is Regolith's, unchanged, and the provider is still not required to sign, as Regolith left it); `program/src/lib.rs` — the `security.txt` block's `project_url`, `contacts`, `policy` and `source_code` point at MyBarPool and this repository. The `Var` layout, `Sample`, `Reveal`, `Next`, `Close` and the keccak formulas are Regolith's code, unmodified. The repository also gains the Apache-2.0 licence text (declared in the Cargo manifests upstream but not shipped), a `NOTICE`, this README section, an updated `SECURITY.md` and CI workflows.
+
+The provider — the party that picks each seed, publishes its commit and reveals it — is MyBarPool's keeper, and MyBarPool is also this deployment's upgrade authority. How the draw stays fair when the same party runs the provider and the program is explained in [`war2wigz/mybarpool`](https://github.com/war2wigz/mybarpool): [`docs/ARCHITECTURE.md` › Randomness](https://github.com/war2wigz/mybarpool/blob/main/docs/ARCHITECTURE.md) and [`docs/PROGRAM.md` §4.4](https://github.com/war2wigz/mybarpool/blob/main/docs/PROGRAM.md). In short, the consuming program records the commit on its own account before the end slot and later verifies the seed, the slot hash and the recomputed value itself, so this deployment can stop a draw but never steer one.
+
+To verify: `cargo build-sbf --arch v3` from the workspace root with Agave 4.3.0 produces `target/deploy/entropy_program.so` with `readelf -h` showing `Flags: 0x3`; `solana-verify build --arch v3 --library-name entropy_program --base-image solanafoundation/solana-verifiable-build@sha256:12fd4c0a0790f0fc41ef74b0cdb6bccc167ba6137eb1adb749bac649481c86bd` reproduces it, and `solana-verify get-executable-hash target/deploy/entropy_program.so` prints the hash the [build workflow](.github/workflows/build.yml) prints and uploads for every commit. Once deployed, [verify.osec.io/status/ASo8r4EEFLPAMDk1w3XdKbEmq4c1GynbsHGa6RGG83fH](https://verify.osec.io/status/ASo8r4EEFLPAMDk1w3XdKbEmq4c1GynbsHGa6RGG83fH) shows the on-chain hash against this source.
+
+Regolith's README follows unchanged.
+
+---
+
 # Entropy [WIP]
 
 **Entropy** is a provably-fair random number generation protocol for Solana. It uses an commit-reveal scheme paired with slothash sampling strategy to generate random numbers onchain in a secure and cost-effective way.
