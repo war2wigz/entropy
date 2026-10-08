@@ -1,0 +1,106 @@
+name: Verifiable build
+
+# The Solana Foundation's reusable build-verify-deploy workflow, pinned to a
+# tag, with deploy, verification and Squads wired but OFF until the consuming
+# project's deployment step (war2wigz/mybarpool's build plan, Step 14), which
+# flips `deploy`/`verify`/`use-squads`/`squads-export` to true and adds the
+# multisig secrets. The same file as war2wigz/mybarpool's, adapted: the
+# program is `entropy_program`, the id is this deployment's, and `upload_idl`
+# is false because Entropy has no IDL (which is also why
+# `use-program-metadata-idl` is false here).
+#
+# The Foundation's `build-verified` action has no SBPF arch input and builds
+# v0, so the `sbpf-v3` job runs `solana-verify build --arch v3` itself and
+# fails unless the ELF header reports `Flags: 0x3`.
+#
+# The Foundation job needs MAINNET_DEPLOYER_KEYPAIR even with deploy off (its
+# address-extraction step is unconditional), so it runs only once that secret
+# is set; until then the `sbpf-v3` job alone produces the hash.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy after build (deployment step only; needs the mainnet secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  SOLANA_VERIFY_VERSION: "0.5.2"
+  # solana-verify picks its Docker image from the `solana-program` version in
+  # Cargo.lock (2.1 here), whose image carries a `cargo-build-sbf` without
+  # `--arch v3`. This is the digest solana-verify 0.5.2 maps to Agave 4.3.0.
+  VERIFY_BASE_IMAGE: solanafoundation/solana-verifiable-build@sha256:12fd4c0a0790f0fc41ef74b0cdb6bccc167ba6137eb1adb749bac649481c86bd
+  PROGRAM_ID: "ASo8r4EEFLPAMDk1w3XdKbEmq4c1GynbsHGa6RGG83fH"
+
+jobs:
+  gate:
+    name: Mainnet secrets present?
+    runs-on: ubuntu-latest
+    outputs:
+      has-deployer: ${{ steps.check.outputs.has-deployer }}
+    steps:
+      - id: check
+        env:
+          HAS: ${{ secrets.MAINNET_DEPLOYER_KEYPAIR != '' }}
+        run: echo "has-deployer=$HAS" >> "$GITHUB_OUTPUT"
+
+  foundation-build:
+    name: Foundation reusable build (hash only)
+    needs: gate
+    if: needs.gate.outputs.has-deployer == 'true'
+    uses: solana-foundation/github-workflows/.github/workflows/reusable-build.yaml@757c3917783064cbdd76f71c6b23e38e7b440dcb # v0.5.2
+    secrets:
+      MAINNET_DEPLOYER_KEYPAIR: ${{ secrets.MAINNET_DEPLOYER_KEYPAIR }}
+    with:
+      program: entropy_program
+      program-id: "ASo8r4EEFLPAMDk1w3XdKbEmq4c1GynbsHGa6RGG83fH"
+      network: mainnet
+      deploy: false
+      upload_idl: false
+      verify: false
+      use-squads: false
+      squads-export: false
+      use-program-metadata-idl: false
+    # Only the deployer keypair is passed (the workflow reads its address even
+    # with deploy off). The deployment step adds MAINNET_MULTISIG and
+    # MAINNET_MULTISIG_VAULT and flips deploy/verify/use-squads/squads-export
+    # to true; upload_idl stays false.
+
+  sbpf-v3:
+    name: solana-verify build --arch v3 + readelf
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust (host, for solana-verify)
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install solana-verify ${{ env.SOLANA_VERIFY_VERSION }}
+        # From outside the checkout: this repository's rust-toolchain.toml pins
+        # the host to 1.85.0 (upstream's pin, kept), which is older than
+        # solana-verify's dependencies accept; the program itself is built
+        # inside solana-verify's Docker image, where that pin has no effect.
+        run: cd "$RUNNER_TEMP" && cargo install solana-verify --version "$SOLANA_VERIFY_VERSION" --locked
+
+      - name: solana-verify build --arch v3
+        run: solana-verify build --arch v3 --library-name entropy_program --base-image "$VERIFY_BASE_IMAGE"
+
+      - name: SBPFv3 header check
+        run: |
+          set -euo pipefail
+          readelf -h target/deploy/entropy_program.so | tee /dev/stderr | grep -q 'Flags:\s*0x3'
+
+      - name: Executable hash
+        run: solana-verify get-executable-hash target/deploy/entropy_program.so

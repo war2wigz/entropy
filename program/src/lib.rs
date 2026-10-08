@@ -22,7 +22,7 @@ pub fn process_instruction(
     let (ix, data) = parse_instruction(&entropy_api::ID, program_id, data)?;
 
     match ix {
-        // EntropyInstruction::Open => process_open(accounts, data)?,
+        EntropyInstruction::Open => process_open(accounts, data)?,
         EntropyInstruction::Close => process_close(accounts, data)?,
         EntropyInstruction::Next => process_next(accounts, data)?,
         EntropyInstruction::Reveal => process_reveal(accounts, data)?,
@@ -42,11 +42,11 @@ entrypoint!(process_instruction);
 
 security_txt! {
     name: "Entropy",
-    project_url: "https://ore.supply",
-    contacts: "email:hardhatchad@gmail.com,discord:hardhatchad",
-    policy: "https://github.com/regolith-labs/entropy/blob/master/SECURITY.md",
+    project_url: "https://mybarpool.com",
+    contacts: "email:security@mybarpool.com",
+    policy: "https://github.com/war2wigz/entropy/blob/master/SECURITY.md",
     preferred_languages: "en",
-    source_code: "https://github.com/regolith-labs/entropy"
+    source_code: "https://github.com/war2wigz/entropy"
     // source_revision: default_env!("GITHUB_SHA", ""),
     // source_release: default_env!("GITHUB_REF_NAME", ""),
     // auditors: "None"
