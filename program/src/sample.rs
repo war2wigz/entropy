@@ -23,7 +23,13 @@ pub fn process_sample(accounts: &[AccountInfo<'_>], _data: &[u8]) -> ProgramResu
     let slot_hashes =
         bincode::deserialize::<SlotHashes>(slot_hashes_sysvar.data.borrow().as_ref()).unwrap();
 
-    // Record the sampled slot hash.
+    // Record the sampled slot hash. This deployment differs from Regolith's here: when the
+    // sysvar has no entry for `end_at` — the slot is too recent (a bank holds hashes up to the
+    // previous slot, so the entry appears in slot `end_at + 1` at the earliest), was skipped, or
+    // is older than the sysvar's window — Regolith's code records `keccak(end_at)`, a value
+    // anyone can compute in advance, and the `Var` is sampled for good. A `Var` written that way
+    // cannot be unwritten, and all three ways the lookup misses deserve a retry or a replacement,
+    // never a sample; so this deployment fails instead and writes nothing.
     if let Some(slot_hash) = slot_hashes.get(&var.end_at) {
         var.slot_hash = slot_hash.to_bytes();
         sol_log(&format!(
@@ -32,13 +38,11 @@ pub fn process_sample(accounts: &[AccountInfo<'_>], _data: &[u8]) -> ProgramResu
             slot_hash.to_string()
         ));
     } else {
-        let hash = solana_program::keccak::hashv(&[&var.end_at.to_le_bytes()]);
-        var.slot_hash = hash.to_bytes();
         sol_log(&format!(
-            "No hash for slot {:?}. Generated: {:?}",
-            var.end_at,
-            hash.to_string()
+            "No hash for slot {:?}: too early, skipped, or older than the sysvar window",
+            var.end_at
         ));
+        return Err(EntropyError::SlotHashUnavailable.into());
     }
 
     Ok(())
