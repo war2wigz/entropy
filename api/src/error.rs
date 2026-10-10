@@ -8,6 +8,9 @@ pub enum EntropyError {
 
     #[error("Invalid seed")]
     InvalidSeed = 1,
+
+    #[error("Slot hash unavailable")]
+    SlotHashUnavailable = 2,
 }
 
 error!(EntropyError);
